@@ -1,0 +1,55 @@
+<?php
+
+namespace App\Models;
+
+use App\Models\Scopes\CompanyIdScope;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Request;
+
+class SalesProductFieldValue extends BaseTenantModel
+{
+    use SoftDeletes, HasFactory;
+
+    protected $casts = [
+        'is_active' => 'boolean',
+    ];
+
+    protected $fillable = [
+        'company_id',
+        'product_field_id',
+        'product_id',
+        'branch_id',
+        'sale_product_id',
+        'purchase_stock_product_id',
+        'purchase_product_id',
+        'stock_product_id',
+        'stock_reconciliation_id',
+        'stock_transfer_id',
+        'stock_adjustment_id',
+        'quantity_index',
+        'value',
+        'deleted_at',
+        'quantity_type'
+    ];
+
+    protected $dates = ['deleted_at'];
+
+   
+
+    public function productField()
+    {
+        return $this->belongsTo(ProductField::class, 'product_field_id');
+    }
+
+    public function product()
+    {
+        return $this->belongsTo(Product::class);
+    }
+
+    public function saleProduct()
+    {
+        return $this->belongsTo(SaleProduct::class, 'sale_product_id');
+    }
+}

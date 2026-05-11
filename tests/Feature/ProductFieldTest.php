@@ -1,0 +1,168 @@
+<?php
+
+namespace Tests\Feature;
+
+
+
+use App\Models\User;
+use App\Models\Company;
+use App\Models\CompanyUser;
+use App\Models\ProductField;
+
+
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\WithFaker;
+
+use Spatie\Permission\Models\Role;
+use Laravel\Sanctum\Sanctum;
+
+use Tests\TestCase;
+
+class ProductFieldTest extends TestCase
+{
+     /**
+     * A basic feature test example.
+     */
+    use RefreshDatabase;
+
+
+    protected $company;
+
+    protected $companyAdmin;
+
+    
+    protected function setUp(): void
+{
+    parent::setUp();
+    $this->company = Company::factory()->create();
+
+    $this->companyAdmin = User::factory()->companyAdmin()->create();
+
+    CompanyUser::factory()->create([
+        'company_id' => $this->company->id,
+        'user_id' => $this->companyAdmin->id,
+    ]);
+    Sanctum::actingAs($this->companyAdmin, ['*']);
+    
+   
+    $this->actingAs($this->companyAdmin)->withHeaders([
+        'company_id' => $this->company->id
+    ]);
+
+  
+}
+
+public function test_lists_all_product_fields(): void
+{
+   
+    ProductField::factory()->count(15)->create([
+        'company_id' => $this->company->id 
+    ]);
+
+    $response = $this->getJson('/api/company/product-fields');
+
+    $response->assertStatus(200)
+             ->assertJsonStructure([
+                 'data' => [
+                     '*' => [
+                         'id',
+                         'name',
+                         'company_id',
+                         'is_active'
+                     ]
+                 ],
+                 'links' => [
+                     '*' => [
+                         'url',
+                         'label',
+                         'active'
+                     ]
+                 ],
+                 'current_page',
+                 'first_page_url',
+                 'from',
+                 'last_page',
+                 'last_page_url',
+                 'next_page_url',
+                 'path',
+                 'per_page',
+                 'prev_page_url',
+                 'to',
+                 'total'
+             ]);
+
+   
+    $responseData = $response->json();
+    $this->assertGreaterThan(0, count($responseData['data']), 
+        'Expected at least one Product Field but got none. Check company filtering.');
+    
+   
+    if (count($responseData['data']) > 0) {
+        $this->assertEquals($this->company->id, $responseData['data'][0]['company_id'],
+            'First item belongs to wrong company');
+    }
+    
+    
+    $this->assertLessThanOrEqual(10, count($responseData['data']));
+}
+
+    public function test_creates_a_product_field(): void
+    {
+        $response = $this->postJson('/api/company/product-fields', [
+            'name' => 'Trial Balance',
+            'company_id' => $this->company->id,
+            'is_active' => true,
+        ]);
+
+        $response->assertStatus(201)
+                 ->assertJsonFragment([
+                     'name' => 'Trial Balance',
+                     'company_id' => $this->company->id,
+                     'is_active' => true,
+                 ]);
+        $this->assertTrue(ProductField::where('name', 'Trial Balance')->exists());
+    }
+
+  
+
+
+    public function test_updates_a_product_field(): void
+    {
+        $field = ProductField::create([
+            'name' => 'Balance Sheet',
+            'is_active' => true,
+            'company_id' => $this->company->id]);
+
+        $response = $this->putJson("/api/company/product-fields/{$field->id}", [
+            'name' => 'Balance Sheet update',
+            'company_id' => $this->company->id,
+            'is_active' => false,
+        ]);
+
+        $response->assertStatus(200)
+                 ->assertJsonFragment([
+                     'name' => 'Balance Sheet update',
+                     'company_id' => $this->company->id,
+                     'is_active' => false,
+                 ]);
+        $this->assertFalse(ProductField::find($field->id)->is_active);
+    }
+
+  
+   
+
+    public function test_deletes_a_product_field(): void
+    {
+        $field = ProductField::create([
+            'name' => 'Debit Book',
+            'is_active' => true,
+            'company_id' => $this->company->id]);
+
+        $response = $this->deleteJson("/api/company/product-fields/{$field->id}");
+
+        $response->assertStatus(200)
+                 ->assertJson(['message' => 'Product Field deleted!!']);
+        $this->assertNotNull(ProductField::withTrashed()->find($field->id)->deleted_at);
+    }
+
+}

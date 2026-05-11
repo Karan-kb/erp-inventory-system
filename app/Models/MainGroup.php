@@ -1,0 +1,46 @@
+<?php
+
+namespace App\Models;
+use App\Models\Scopes\CompanyIdScope;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+class MainGroup extends BaseTenantModel
+{
+    use softDeletes, HasFactory;
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'is_primary' => 'boolean'
+    ];
+
+    protected $fillable = [
+        'name',
+        'company_id',
+        'is_active',
+        'deleted_at',
+        'is_primary',
+    ];
+
+    protected $dates = ['deleted_at'];
+
+    // protected static function booted()
+    // {
+    //     static::addGlobalScope(new CompanyIdScope());
+    // }
+
+    public function subGroups(): HasMany
+    {
+        return $this->hasMany(SubGroup::class, 'main_group_id');
+    }
+    public function accountGroups(): HasMany
+    {
+        return $this->hasMany(AccountGroup::class, 'main_group_id');
+    }
+    public function journalVoucherTransactions(): HasMany
+    {
+        return $this->hasMany(JournalVoucherTransaction::class, 'main_group_id');
+    }
+
+}

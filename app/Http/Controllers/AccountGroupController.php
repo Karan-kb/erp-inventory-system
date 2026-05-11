@@ -1,0 +1,276 @@
+<?php
+
+namespace App\Http\Controllers;
+use App\Models\AccountGroup;
+use App\Models\AccountHead;
+use App\Models\VoucherSummary;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
+
+class AccountGroupController extends Controller
+{
+
+
+    public function index(Request $request): JsonResponse
+    {
+        $query = AccountGroup::with(['mainGroup:id,name', 'subGroup:id,name']);
+
+        if ($request->has('keywords')) {
+            $query->where('name', 'LIKE', '%' . $request->input('keywords') . '%');
+        }
+
+        return response()->json($query->paginate(50));
+    }
+
+    
+    public function accountGroupList(Request $request){
+        try{
+
+            $accountGroups = AccountGroup::whereNull('deleted_at')
+            ->where('is_active', 1)
+            ->get(['id', 'name'])
+            ->map(fn($accountGroup) => ['id' => $accountGroup->id, 'name' => $accountGroup->name])
+            ->values()
+            ->toArray();
+            return response()->json(["message"=>"Account Group List Received !!",
+                                       "data"=>$accountGroups
+                                    ]);
+
+        }catch(ModelNotFoundException $e){
+          
+            return response()->json(["error"=>"Account Group not Found !!"],404);
+        }catch(QueryException $e){
+           
+            return response()->json(["error"=>"Database error occurred !!"],500);
+        }catch(\Exception $e){
+          
+            return response()->json(["error"=>"An unexpected error occurred !!"],500);
+        }
+    }
+    public function accountGroupDetails(Request $request){
+        try{
+
+           $companyId  = $request->company_id;
+           if(!$companyId){
+            return response()->json(["error"=>"No Company Logged In !!"],404);
+           }
+
+           $accountGroup = $request->account_group_name;
+           $accountGroupDetails = AccountGroup::where('company_id',$request->company_id)
+                                         ->where('name',$accountGroup)
+                                       ->whereNull('deleted_at')
+                                       ->firstorFail();   
+           return response()->json(["message"=>"Account Group Details Received !!",
+                                    "data"=>$accountGroupDetails
+                                ],200);
+
+
+        }catch(ModelNotFoundException $e){
+            return response()->json(["error"=>"Account Group not Found !!"],404);
+        }catch(QueryException $e){
+            return response()->json(["error"=>"Database error occurred !!"],500);
+        }catch(\Exception $e){
+            return response()->json(["error"=>"An unexpected error occurred !!"],500);
+        }
+    }
+
+    public function update(Request $request, $id): JsonResponse
+    {
+        try {
+            $group = AccountGroup::findOrFail($id);
+            $validator = Validator::make($request->all(), [
+                'name' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('account_groups')
+                        ->ignore($id)
+                        ->where(function ($query) use ($request, $group) {
+                            return $query->where('company_id', $request->input('company_id', $request->company_id))
+                                ->whereNull('deleted_at');
+
+                        }),
+                ],
+                'is_active' => 'boolean|required',
+                'is_primary' => 'boolean',
+                'company_id' => 'integer',
+                'main_group_id' => 'integer|exists:main_groups,id',
+                'sub_group_id' => 'integer|exists:sub_groups,id',
+                'code' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('account_groups')
+                        ->ignore($id)
+                        ->where(function ($query) use ($request, $group) {
+                            return $query->where('company_id', $request->input('company_id', $request->company_id))
+                                ->whereNull('deleted_at');
+
+                        }),
+                ],
+
+            ]);
+            if ($validator->fails()) {
+                $errors = collect($validator->errors()->all())->values();
+                return response()->json([
+                    'error' => "Validation failed",
+                    'messages' => $errors,
+                ], 422);
+            }
+            $validated = $validator->validated();
+
+            if ($this->checkIfUsed($id))
+                return response()->json(['error' => 'Cannot not modify. The item has already been used'], 406);
+
+
+            $group->update($validated);
+            return response()->json($group);
+        } catch (ModelNotFoundException $e) {
+            
+            return response()->json(['error' => 'Account Group not found!!'], 404);
+        } catch (QueryException $e) {
+            
+            return response()->json(['error' => 'An unexpected error occurred!!'], 500);
+        } catch (\Exception $e) {
+           
+            return response()->json(['error' => 'An unexpected error occurred!!'], 500);
+        }
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        try {
+
+            $validator = Validator::make($request->all(), [
+                'name' => [
+                    'required',
+                    'string',
+                    'max:255',
+                    Rule::unique('account_groups')->where(function ($query) use ($request) {
+                        return $query->where('company_id', $request->company_id)
+                            ->whereNull('deleted_at');
+
+                    }),
+
+                ],
+                'is_active' => 'boolean|required',
+                'is_primary' => 'boolean',
+                'company_id' => 'integer',
+                'main_group_id' => 'integer|exists:main_groups,id',
+                'sub_group_id' => 'integer|exists:sub_groups,id'
+            ]);
+
+            if ($validator->fails()) {
+                $errors = collect($validator->errors()->all())->values();
+                return response()->json([
+                    'error' => "Validation failed",
+                    'messages' => $errors,
+                ], 422);
+            }
+            $validated = $validator->validated();
+            $lastGroup = AccountGroup::where(['sub_group_id' => $validated['sub_group_id'], 'main_group_id' => $validated['main_group_id']])->orderBy('code', 'DESC')->first();
+            $validated['code'] = $lastGroup ? (int) ($lastGroup->code) + 1 : 1;
+            $group = AccountGroup::create($validated);
+            return response()->json($group, 201);
+        } catch (ModelNotFoundException $e) {
+           
+            return response()->json(['error' => 'Main Group not found!!'], 404);
+        } catch (QueryException $e) {
+           
+            return response()->json(['error' => 'An unexpected error occurred!!'], 500);
+        } catch (\Exception $e) {
+           
+            return response()->json(['error' => 'An unexpected error occurred!!'], 500);
+        }
+    }
+
+    public function show($id): JsonResponse
+    {
+        try {
+            $group = AccountGroup::findOrFail($id);
+            return response()->json($group);
+        } catch (ModelNotFoundException $e) {
+           
+            return response()->json(['error' => 'Account Group not found!!'], 404);
+        } catch (QueryException $e) {
+            
+            return response()->json(['error' => 'An unexpected error occurred!!'], 500);
+        }
+    }
+
+   
+    public function destroy($id): JsonResponse
+    {
+        try {
+            $group = AccountGroup::findOrFail($id);
+    
+            $usedIn = [];
+    
+            if ($group->accountHeads()->exists()) {
+                $usedIn[] = 'account heads';
+            }
+            if ($group->voucherSummaries()->exists()) {
+                $usedIn[] = 'voucher summaries';
+            }
+            if ($group->fixedAssetGroup()->exists()) {
+                $usedIn[] = 'fixed asset groups';
+            }
+            if ($group->journalVoucherTransactions()->exists()) {
+                $usedIn[] = 'journal voucher transactions';
+            }
+            if ($group->voucherSummaryDetails()->exists()) {
+                $usedIn[] = 'voucher summary details';
+            }
+    
+            if (!empty($usedIn)) {
+                return response()->json([
+                    'error' => 'in_use',
+                    'message' => 'Account Group cannot be deleted because it is used in: ' . implode(', ', $usedIn),
+                    'used_in' => $usedIn
+                ], 400);
+            }
+    
+            $group->delete();
+    
+            return response()->json([
+                'success' => true,
+                'message' => 'Account Group deleted successfully!'
+            ]);
+    
+        } catch (ModelNotFoundException $e) {
+            
+            return response()->json([
+                'error' => 'not_found',
+                'message' => 'Account Group not found!'
+            ], 404);
+    
+        } catch (QueryException $e) {
+           
+            return response()->json([
+                'error' => 'query_error',
+                'message' => 'A database error occurred while deleting the Account Group.'
+            ], 500);
+    
+        } catch (\Exception $e) {
+          
+            return response()->json([
+                'error' => 'unexpected_error',
+                'message' => 'An unexpected error occurred while deleting the Account Group.'
+            ], 500);
+        }
+    }
+    
+
+    private function checkIfUsed($id): bool
+    {
+        if (AccountHead::where('account_group_id', $id)->first() || VoucherSummary::where('account_group_id', $id)->first()) {
+            return true;
+        }
+        return false;
+
+    }
+}
